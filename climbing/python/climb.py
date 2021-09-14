@@ -110,6 +110,7 @@ class Climber():
         pos1 = self.geo.world2coord((x - self.dx, y - self.dx))
         pos2 = self.geo.world2coord((x + self.dx, y + self.dx))
         pos = list(np.append(pos1, pos2))
+
         self.climber = self.geo.canvas.create_oval(pos, fill='blue')
         self.pos   = self.get_position()
         self.speed = np.array([0. , 0.])
@@ -118,7 +119,6 @@ class Climber():
         pass
 
     def set_force(self,F):
-        #print ('Force = ',F)
         self.accel=F/self.m
 
     def set_speed(self,vx,vy):
@@ -127,14 +127,11 @@ class Climber():
     def set_accel(self,ax,ay):
         self.accel = np.array([ax, ay])
 
+    def get_force(self):
+        return self.m * self.accel
+
     def get_speed(self):
         return self.speed
-
-    def get_accel(self):
-        return self.accel
-
-    def get_force(self):
-        return self.m * self.get_accel()
 
     def get_force_magnitude(self):
         return np.linalg.norm(self.get_force())
@@ -154,18 +151,22 @@ class Climber():
         x,y = self.get_canvas_position()
         return self.geo.coord2world((x,y))
 
-    def update(self,dt,scale=1.0,refresh=True):
-        v=self.get_speed()
-        a=self.get_accel()
+    def update(self,dt):
+        v=self.speed
+        a=self.accel
         v+= a * dt
+        self.set_speed(v[0],v[1])
         self.geo.canvas.move(self.climber, v[0] * self.geo.m2pix * dt, -v[1] * self.geo.m2pix * dt)
-        if scale:
-            x,y   = self.get_canvas_position()
-            dx,dy = self.get_force() / scale
-            if refresh and self.force_vector: self.geo.canvas.delete(self.force_vector)
-            self.force_vector = self.geo.canvas.create_line(x,y,
-                                                            x + dx,
-                                                            y - dy, fill='red',arrow=tkr.LAST,width=3)
+        self.pos   = self.get_position()
+
+    def draw_force(self,scale,refresh=True):
+        x,y   = self.get_canvas_position()
+        dx,dy = self.get_force() / scale
+        if refresh and self.force_vector: self.geo.canvas.delete(self.force_vector)
+        self.force_vector = self.geo.canvas.create_line(x,y,
+                                                        x + dx,
+                                                        y - dy, fill='red',arrow=tkr.LAST,width=3)
+
 
 class Rope():
     def __init__(self,geometry):
@@ -173,15 +174,22 @@ class Rope():
         self.rope_color='green'
         self.rope      = None
         self.rope_points = []
-        self.k1 = 5916.8
-        self.k2 = 1620.0
-        self.c =   1376.0
+        #self.k1 = 5916.8
+        #self.k2 = 1620.0
+        #self.c =   1376.0
 
-        self.k1 = 5916.8
-        self.k2 = 1620.0
-        self.c = 1500
+        self.k1 = 6000
+        self.k2 = 1500
+        self.c  = 1500
 
         self.force_vector = None
+        self.tension      = None
+        self.tension_direction = None
+
+    def set_constants(self,k1,k2,c):
+        self.k1 = k1
+        self.k2 = k2
+        self.c  = c
 
     def add_anchor(self,x,y,angle):
         self.anchor_pos_world = np.array([x,y])
@@ -198,8 +206,6 @@ class Rope():
     def add_climber(self,climber):
         self.climber = climber
         self.rope_points.append(self.climber.get_position())
-
-
 
     def compute_length(self):
         d=0
@@ -224,15 +230,16 @@ class Rope():
     def set_rope_length(self,length):
         self.length = length
 
+
+    def update(self):
+        self.rope_points[-1] = self.climber.get_position()
+        self.get_stretch()
+        self.compute_tension()
+
     def draw(self,scale=1.0,refresh=True):
 
-        self.rope_points[-1] = self.climber.get_position()
-
         if self.rope: self.geo.canvas.delete(self.rope)
-
-
-
-        if not self.get_stretch(): color = self.rope_color
+        if not self.stretch: color = self.rope_color
         else: color = 'red'
         self.rope_points_canvas = []
         for xy in self.rope_points:
@@ -245,7 +252,7 @@ class Rope():
         if scale:
             if refresh and self.force_vector: self.geo.canvas.delete(self.force_vector)
             a = self.rope_points_canvas[-1]
-            b = self.Tension()/scale
+            b = self.tension_direction/scale
             self.force_vector = self.geo.canvas.create_line(a[0],
                                                             a[1],
                                                             a[0] + b[0],
@@ -255,16 +262,15 @@ class Rope():
 
     def get_stretch(self):
         length = self.compute_length()
-        stretch = max(0, length - self.length)
-        return stretch
+        self.stretch = max(0, length - self.length)
 
-    def Tension(self):
+    def compute_tension(self):
         direction = self.compute_tension_direction()
         v         = self.climber.get_speed()
-        y         = self.get_stretch() * 2.6/self.length
+        y         = self.stretch * 2.6/self.length
         vt        = np.dot(v, direction)*(y>0)
-        self.T   = max(0,self.k1 * y + self.k2 * y**3 - self.c * vt * (vt>0))
-        return np.array(self.T * direction)
+        self.tension   = max(0,self.k1 * y + self.k2 * y**3 - self.c * vt * (vt>0))
+        self.tension_direction = np.array(self.tension * direction)
 
 
 if __name__=='__main__':
@@ -276,12 +282,11 @@ if __name__=='__main__':
     parser.add_argument('--offset_time', action='store_true')
     parser.add_argument('--mode', type=str, default='standard', required=False, choices=['standard','fall','crazy'])
     parser.add_argument('--mass', type=float, default=80, required=False)
+    parser.add_argument('--animation', action='store_true')
 
     args = parser.parse_args()
 
     g=Geometry(W=10,H=20,scale=2)
-
-    g.DrawReferenceGrid(10)
     a_grav = 9.8
 
     mode = args.mode
@@ -323,49 +328,60 @@ if __name__=='__main__':
     r.add_climber(c)
     length = r.compute_length()
     r.set_rope_length(length)
-    r.draw()
 
-    dt=args.dt
-    tstart=0
-    Time = []
-    Y    = []
-    VY   = []
-    FX   = []
-    FY   = []
-    T    = []
-    S    = []
+    dt     = args.dt
+    tstart = 0
+    t      = 0
+    Time   = []
+    Y      = []
+    VY     = []
+    FX     = []
+    FY     = []
+    T      = []
+    S      = []
 
-    t    = 0
+    #r.set_constants(self, k1, k2, c)
+
+    r.update()
+
     p    = c.get_position()
-    f   = c.get_accel() * mass
-    v   = c.get_speed()
+    v    = c.get_speed()
+    f    = c.get_force()
+
+    if args.animation:
+        g.DrawReferenceGrid(10)
+        r.draw()
 
     while y > g.bottom and tstart<args.tmax:
-        if (args.offset_time and np.linalg.norm(r.Tension())>0) or not args.offset_time:
+        if (args.offset_time and r.tension>0) or not args.offset_time:
             Time.append(tstart)
             Y.append(p[1])
             VY.append(v[1])
             FX.append(f[0])
             FY.append(f[1])
-            T.append(r.T)
+            T.append(r.tension)
+            S.append(r.stretch)
+
             tstart+=dt
 
-        S.append(r.get_stretch())
 
         t+=dt
-        g.DisplayTime('%.3f' % t)
-        F = r.Tension() + Fgrav
+        c.update(dt)
+        r.update()
+
+        F = r.tension_direction + Fgrav
         c.set_force(F)
-        c.update(dt,scale=50)
-        r.draw(scale=50)
 
         p  = c.get_position()
         v = c.get_speed()
-        f = c.get_accel() * mass
+        f = c.get_force()
 
-
-        g.tk.update()
-        time.sleep(0.01)
+        if args.animation:
+            r.draw(scale=50)
+            c.draw_force(scale=50)
+            g.DisplayTime('%.3f' % t)
+            g.tk.update()
+            time.sleep(0.01)
         pass
 
     Time  = np.array(Time)
