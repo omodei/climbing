@@ -314,7 +314,7 @@ if __name__=='__main__':
         anchor_y = -10.0
         quickdraw_x = 0.0
         quickdraw_y = 5.0
-        x = quickdraw_x + 2.0
+        x = quickdraw_x + 1.0
         y0 = y = quickdraw_y + 5.0
         pass
 
@@ -351,7 +351,8 @@ if __name__=='__main__':
     if args.animation:
         g.DrawReferenceGrid(10)
         r.draw()
-
+    start_fall=0.0
+    set_tstart=False
     while y > g.bottom and tstart<args.tmax:
         if (args.offset_time and r.tension>0) or not args.offset_time:
             Time.append(tstart)
@@ -360,10 +361,13 @@ if __name__=='__main__':
             FX.append(f[0])
             FY.append(f[1])
             T.append(r.tension)
+
+            if r.tension>0 and not set_tstart:
+                start_fall = tstart
+                set_tstart = True
+
             S.append(r.stretch)
-
             tstart+=dt
-
 
         t+=dt
         c.update(dt)
@@ -419,7 +423,7 @@ if __name__=='__main__':
     plt.plot(Time,T,label='rope tension')
 
     data = RopeData()
-    plt.plot(data[0], data[1], 'gray',label='Edelrid Cobra 10.3mm')
+    plt.plot(data[0]+start_fall, data[1], 'gray',label='Edelrid Cobra 10.3mm')
 
     plt.ylabel('Tension F$_{y}$ [N]')
     plt.xlabel('Time [s]')
